@@ -1,3 +1,7 @@
+#ifdef _GNU_SOURCE
+#undef _GNU_SOURCE
+#endif
+
 #include <asm/ioctls.h>
 #include <dirent.h>
 #include <errno.h>
@@ -761,7 +765,6 @@ int sys_tcdrain(int) {
 int sys_socket(int domain, int type_and_flags, int proto, int *fd) {
 	constexpr int type_mask = int(0xF);
 	constexpr int flags_mask = ~int(0xF);
-	__ensure(!((type_and_flags & flags_mask) & ~(SOCK_CLOEXEC | SOCK_NONBLOCK)));
 
 	SignalGuard sguard;
 
@@ -1296,6 +1299,40 @@ int sys_timerfd_settime(
 		oldvalue->it_value.tv_nsec = resp.value_nsec();
 		oldvalue->it_interval.tv_sec = resp.interval_sec();
 		oldvalue->it_interval.tv_nsec = resp.interval_nsec();
+	}
+
+	return 0;
+}
+
+int sys_timerfd_gettime(int fd, struct itimerspec *its) {
+	SignalGuard sguard;
+
+	managarm::posix::TimerFdGetRequest<MemoryAllocator> req(getSysdepsAllocator());
+	req.set_fd(fd);
+
+	auto [offer, sendReq, recvResp] = exchangeMsgsSync(
+	    getPosixLane(),
+	    helix_ng::offer(
+	        helix_ng::sendBragiHeadOnly(req, getSysdepsAllocator()), helix_ng::recvInline()
+	    )
+	);
+
+	HEL_CHECK(offer.error());
+	HEL_CHECK(sendReq.error());
+	HEL_CHECK(recvResp.error());
+
+	managarm::posix::TimerFdGetResponse<MemoryAllocator> resp(getSysdepsAllocator());
+	resp.ParseFromArray(recvResp.data(), recvResp.length());
+	if (resp.error() != managarm::posix::Errors::SUCCESS)
+		return resp.error() | toErrno;
+
+	if (its) {
+		its->it_value.tv_sec = resp.value_sec();
+		its->it_value.tv_nsec = resp.value_nsec();
+		its->it_interval.tv_sec = resp.interval_sec();
+		its->it_interval.tv_nsec = resp.interval_nsec();
+	} else {
+		return EFAULT;
 	}
 
 	return 0;

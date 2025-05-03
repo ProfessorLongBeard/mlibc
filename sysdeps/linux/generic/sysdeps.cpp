@@ -991,6 +991,30 @@ int sys_madvise(void *addr, size_t length, int advice) {
 	return 0;
 }
 
+int sys_posix_madvise(void *addr, size_t length, int advice) {
+	if(advice == POSIX_MADV_DONTNEED) {
+		// POSIX_MADV_DONTNEED is a no-op in both glibc and musl.
+		return 0;
+	}
+	switch(advice) {
+	case POSIX_MADV_NORMAL:
+		advice = MADV_NORMAL;
+		break;
+	case POSIX_MADV_RANDOM:
+		advice = MADV_RANDOM;
+		break;
+	case POSIX_MADV_SEQUENTIAL:
+		advice = MADV_SEQUENTIAL;
+		break;
+	case POSIX_MADV_WILLNEED:
+		advice = MADV_WILLNEED;
+		break;
+	default:
+		return EINVAL;
+	}
+	return sys_madvise(addr, length, advice);
+}
+
 int sys_msync(void *addr, size_t length, int flags) {
 	auto ret = do_syscall(SYS_msync, addr, length, flags);
 	if (int e = sc_error(ret); e)
@@ -1090,6 +1114,13 @@ int sys_timerfd_create(int clockid, int flags, int *fd) {
 
 int sys_timerfd_settime(int fd, int flags, const struct itimerspec *value, struct itimerspec *oldvalue) {
 	auto ret = do_syscall(SYS_timerfd_settime, fd, flags, value, oldvalue);
+	if (int e = sc_error(ret); e)
+		return e;
+	return 0;
+}
+
+int sys_timerfd_gettime(int fd, struct itimerspec *its) {
+	auto ret = do_syscall(SYS_timerfd_gettime, fd, its);
 	if (int e = sc_error(ret); e)
 		return e;
 	return 0;
@@ -1579,8 +1610,11 @@ int sys_waitid(idtype_t idtype, id_t id, siginfo_t *info, int options) {
 	return sc_int_result<int>(ret);
 }
 
-int sys_clock_set(int clock, const struct timespec *tp) {
-	auto ret = do_syscall(SYS_clock_settime, clock, tp);
+int sys_clock_set(int clock, time_t secs, long nanos) {
+	struct timespec tp{};
+	tp.tv_sec = secs;
+	tp.tv_nsec = nanos;
+	auto ret = do_syscall(SYS_clock_settime, clock, &tp);
 	if (int e = sc_error(ret); e)
 		return e;
 	return 0;
